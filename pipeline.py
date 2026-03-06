@@ -1,0 +1,178 @@
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, lower, lit, concat_ws, sha2, expr, explode, sum as spark_sum, split, length, collect_list, size
+from pyspark.ml.feature import HashingTF, IDF
+
+def create_spark_session():
+    return SparkSession.builder \
+        .appName("Scholarly Data Pipeline") \
+        .master("local[*]") \
+        .config("spark.driver.memory", "2g") \
+        .getOrCreate()
+
+def process_arxiv(spark, file_path):
+    df = spark.read.json(file_path)
+    
+    # Extract year from update_date string e.g. '2008-11-26'
+    df = df.withColumn("year", expr("cast(substring(update_date, 1, 4) as int)"))
+    
+    # Process authors_parsed array of arrays
+    df = df.withColumn("author_str", expr("transform(authors_parsed, x -> trim(concat_ws(' ', x)))"))
+    
+    res = df.select(
+        col("title"),
+        col("abstract"),
+        col("author_str").alias("authors"),
+        col("year")
+    ).withColumn("source", lit("arxiv"))
+    
+    return res
+
+def process_s2orc(spark, file_path):
+    df = spark.read.json(file_path)
+    
+    # authors is Array of Structs [{"first": "Alice", "last": "Smith"}]
+    df = df.withColumn("author_str", expr("transform(authors, x -> trim(concat_ws(' ', x.first, x.last)))"))
+    
+    res = df.select(
+        col("title"),
+        col("abstract"),
+        col("author_str").alias("authors"),
+        col("year")
+    ).withColumn("source", lit("s2orc"))
+    
+    return res
+
+def main():
+    spark = create_spark_session()
+    
+    print("Loading datasets...")
+    arxiv_df = process_arxiv(spark, "sample_arxiv.json")
+    s2orc_df = process_s2orc(spark, "sample_s2orc.json")
+    
+    print("Combining datasets...")
+    combined_df = arxiv_df.unionByName(s2orc_df)
+    
+    print("\n--- Day 6: Data Quality Layer ---")
+    print("Step 1: Running Validations")
+    raw_df = combined_df
+    
+    valid_df = raw_df.filter(
+        (col("abstract").isNotNull()) &
+        (col("year").isNotNull()) &
+        (size(col("authors")) > 0)
+    )
+    
+    print("Step 2 & 3: Capturing Rejected Records with Reason")
+    rejected_df = raw_df.subtract(valid_df)
+    rejected_df = rejected_df.withColumn("reason", lit("failed_validation"))
+            
+    print("Step 4: Persisting Rejection Index")
+    rejected_df.write \
+        .mode("overwrite") \
+        .parquet("index/rejected_papers")
+        
+    print("Step 5: Continuing Normalization with Valid Records")
+    combined_df = valid_df
+    
+    # Lowercase title and abstract
+    combined_df = combined_df.withColumn("title", lower(col("title"))) \
+                             .withColumn("abstract", lower(col("abstract")))
+                             
+    # Paper_id generated via hash(title + year)
+    combined_df = combined_df.withColumn("paper_id", sha2(concat_ws("", col("title"), col("year")), 256))
+    
+    # Final unified schema layout
+    final_df = combined_df.select("paper_id", "title", "abstract", "authors", "year", "source")
+    
+    print("Step 1: Writing data to Logical Index...")
+    final_df.write \
+        .partitionBy("year") \
+        .mode("overwrite") \
+        .parquet("index/papers")
+    
+    print("Step 2: Validating Index...")
+    indexed_df = spark.read.parquet("index/papers")
+    print("Indexed record count:", indexed_df.count())
+    indexed_df.show(5, truncate=False)
+    
+    print("\n--- Day 3: Author Aggregation Layer ---")
+    print("Step 1: Exploding Authors Array")
+    authors_df = indexed_df.withColumn("author", explode(col("authors")))
+    
+    print("Step 2: Grouping and Counting by Author and Year")
+    author_stats = authors_df.groupBy("author", "year") \
+                             .count() \
+                             .withColumnRenamed("count", "paper_count")
+                             
+    print("Step 3: Persisting Author Index to Parquet")
+    author_stats.write \
+        .partitionBy("year") \
+        .mode("overwrite") \
+        .parquet("index/author_stats")
+        
+    print("Step 4: Validating and running Demo Queries")
+    loaded_author_stats = spark.read.parquet("index/author_stats")
+    
+    print("--> Top Authors Overall:")
+    loaded_author_stats.groupBy("author") \
+        .agg(spark_sum("paper_count").alias("total_papers")) \
+        .orderBy(col("total_papers").desc()) \
+        .show()
+        
+    print("--> Year-over-Year Activity for Alice Smith:")
+    loaded_author_stats.filter(col("author") == "Alice Smith") \
+        .orderBy("year") \
+        .show()
+        
+    print("\n--- Day 5: Enhanced Temporal Topic Aggregation Layer ---")
+    print("Step 1: Tokenizing Abstracts")
+    tokens_df = indexed_df.withColumn("token", explode(split(lower(col("abstract")), " ")))
+    
+    print("Step 2: Cleaning Tokens with Stopwords")
+    stopwords = [
+        "the","and","for","with","this","that","from","are",
+        "was","were","into","their","have","has","had","using",
+        "use","used","paper","study","method","results","based",
+        "a", "in", "is", "of", "to", "on", "as", "by", "at", "an", "be"
+    ]
+    tokens_df = tokens_df.filter(
+        (~col("token").isin(stopwords)) &
+        (length(col("token")) > 3)
+    )
+    
+    print("Step 3: Calculating TF-IDF")
+    doc_tokens = tokens_df.groupBy("paper_id", "year") \
+        .agg(collect_list("token").alias("tokens"))
+        
+    hashingTF = HashingTF(inputCol="tokens", outputCol="tf_features", numFeatures=5000)
+    tf_df = hashingTF.transform(doc_tokens)
+    
+    idf = IDF(inputCol="tf_features", outputCol="tfidf_features")
+    idf_model = idf.fit(tf_df)
+    tfidf_df = idf_model.transform(tf_df)
+    
+    print("Step 4: Grouping by Year and Token (Raw Counts for Index)")
+    temporal_topics = tokens_df.groupBy("year", "token").count()
+    
+    print("Step 5: Persisting Temporal Index to Parquet")
+    temporal_topics.write \
+        .partitionBy("year") \
+        .mode("overwrite") \
+        .parquet("index/temporal_topics")
+        
+    print("Step 6: Validating Enhanced Temporal Topics")
+    topics_df = spark.read.parquet("index/temporal_topics")
+    print("--> Top Topics in 2023 (after stopword filtering):")
+    topics_df.filter(col("year") == 2023) \
+        .orderBy(col("count").desc()) \
+        .show(10)
+        
+    print("--> Trend of Keyword 'quantum':")
+    topics_df.filter(col("token") == "quantum") \
+        .orderBy("year") \
+        .show()
+    
+    spark.stop()
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+
+# Spark / Hadoop
+.spark-staging/
+metastore_db/
+derby.log
+checkpoint/
+
+# Project Data
+live_arxiv.jsonl
+live_s2orc.jsonl
+aggregator_cache.json
+index/
+collab_graph.html
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store

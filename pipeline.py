@@ -1,3 +1,4 @@
+import os
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, lower, lit, concat_ws, sha2, expr, explode, sum as spark_sum, split, length, collect_list, size
 from pyspark.ml.feature import HashingTF, IDF
@@ -46,8 +47,11 @@ def main():
     spark = create_spark_session()
     
     print("Loading datasets...")
-    arxiv_df = process_arxiv(spark, "sample_arxiv.json")
-    s2orc_df = process_s2orc(spark, "sample_s2orc.json")
+    arxiv_file = "live_arxiv.jsonl" if os.path.exists("live_arxiv.jsonl") else "sample_arxiv.json"
+    s2orc_file = "live_s2orc.jsonl" if os.path.exists("live_s2orc.jsonl") else "sample_s2orc.json"
+    
+    arxiv_df = process_arxiv(spark, arxiv_file)
+    s2orc_df = process_s2orc(spark, s2orc_file)
     
     print("Combining datasets...")
     combined_df = arxiv_df.unionByName(s2orc_df)
@@ -80,6 +84,10 @@ def main():
                              
     # Paper_id generated via hash(title + year)
     combined_df = combined_df.withColumn("paper_id", sha2(concat_ws("", col("title"), col("year")), 256))
+    
+    # Deduplicate universally based on the hashed paper ID!
+    print("Zero-Redundancy Deduplication...")
+    combined_df = combined_df.dropDuplicates(["paper_id"])
     
     # Final unified schema layout
     final_df = combined_df.select("paper_id", "title", "abstract", "authors", "year", "source")
@@ -171,6 +179,32 @@ def main():
     topics_df.filter(col("token") == "quantum") \
         .orderBy("year") \
         .show()
+        
+    print("\n--- Phase 3: Author Collaboration Graph ---")
+    print("Step 1: Filtering Multi-Author Papers")
+    multi_author_df = final_df.filter(size(col("authors")) > 1).select("paper_id", "authors")
+    
+    print("Step 2: Exploding and Self-Joining to find Pairs")
+    # Explode once to get (paper_id, author1)
+    a1 = multi_author_df.select("paper_id", explode("authors").alias("author1"))
+    # Explode again to get (paper_id, author2)
+    a2 = multi_author_df.select("paper_id", explode("authors").alias("author2"))
+    
+    # Inner join on paper_id where author1 < author2 to prevent A-B and B-A duplicates and A-A self loops
+    pairs = a1.join(a2, on="paper_id").filter(col("author1") < col("author2"))
+    
+    print("Step 3: Calculating Collaboration Weights")
+    collaborations = pairs.groupBy("author1", "author2").count().withColumnRenamed("count", "weight")
+    
+    print("Step 4: Persisting Graph Index")
+    collaborations.write \
+        .mode("overwrite") \
+        .parquet("index/collaborations")
+        
+    print("Step 5: Validating Collaboration Graph")
+    collab_df = spark.read.parquet("index/collaborations")
+    print("--> Top Collaborations globally:")
+    collab_df.orderBy(col("weight").desc()).show(10, truncate=False)
     
     spark.stop()
 

@@ -6,16 +6,27 @@ from pyspark.ml.feature import HashingTF, IDF
 import sys
 
 def setup_hadoop_env():
-    """Checks and warns about Hadoop configuration on Windows."""
+    """Checks and automatically sets Hadoop environment on Windows."""
     if os.name == 'nt':  # Windows
         hadoop_home = os.environ.get("HADOOP_HOME")
-        if not hadoop_home:
+        
+        # Fallback: check for a 'hadoop' folder in the current directory
+        local_hadoop = os.path.abspath("hadoop")
+        if not hadoop_home and os.path.exists(os.path.join(local_hadoop, "bin", "winutils.exe")):
+            os.environ["HADOOP_HOME"] = local_hadoop
+            hadoop_home = local_hadoop
+            print(f"DEBUG: Automatically set HADOOP_HOME to {local_hadoop}")
+
+        if hadoop_home:
+            # Crucial: Add bin to PATH for the current process
+            hadoop_bin = os.path.join(hadoop_home, "bin")
+            if hadoop_bin not in os.environ["PATH"]:
+                os.environ["PATH"] = hadoop_bin + os.path.pathsep + os.environ["PATH"]
+                print(f"DEBUG: Added {hadoop_bin} to PATH")
+        else:
             print("WARNING: HADOOP_HOME environment variable is not set.")
             print("Spark requires Hadoop binaries (winutils.exe) to run on Windows.")
-            print("Please download them from https://github.com/cdarlint/winutils and set HADOOP_HOME.")
-        elif not os.path.exists(os.path.join(hadoop_home, "bin", "winutils.exe")):
-            print(f"WARNING: winutils.exe not found in {os.path.join(hadoop_home, 'bin')}")
-            print("Spark may fail to perform local IO operations.")
+            print("Please create a 'hadoop' folder here and put the 'bin' folder (with winutils.exe) inside it.")
 
 def create_spark_session():
     return SparkSession.builder \

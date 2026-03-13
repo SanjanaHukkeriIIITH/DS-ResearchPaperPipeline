@@ -4,14 +4,24 @@ from pyspark.sql.functions import col
 import os
 
 def setup_hadoop_env():
-    """Checks and warns about Hadoop configuration on Windows."""
+    """Checks and automatically sets Hadoop environment on Windows."""
     if os.name == 'nt':  # Windows
         hadoop_home = os.environ.get("HADOOP_HOME")
-        if not hadoop_home:
+        
+        # Fallback: check for a 'hadoop' folder in the current directory
+        local_hadoop = os.path.abspath("hadoop")
+        if not hadoop_home and os.path.exists(os.path.join(local_hadoop, "bin", "winutils.exe")):
+            os.environ["HADOOP_HOME"] = local_hadoop
+            hadoop_home = local_hadoop
+
+        if hadoop_home:
+            # Crucial: Add bin to PATH for the current process
+            hadoop_bin = os.path.join(hadoop_home, "bin")
+            if hadoop_bin not in os.environ["PATH"]:
+                os.environ["PATH"] = hadoop_bin + os.path.pathsep + os.environ["PATH"]
+        else:
             st.warning("HADOOP_HOME environment variable is not set. Spark requires Hadoop binaries (winutils.exe) to run on Windows.")
-            st.info("Please download them from https://github.com/cdarlint/winutils and set HADOOP_HOME.")
-        elif not os.path.exists(os.path.join(hadoop_home, "bin", "winutils.exe")):
-            st.error(f"winutils.exe not found in {os.path.join(hadoop_home, 'bin')}. Spark may fail to perform local IO operations.")
+            st.info("Please create a folder named 'hadoop' in this project directory and put the 'bin' folder (with winutils.exe) inside it.")
 
 # Optional: suppress warnings for simple logging
 import logging
@@ -91,9 +101,19 @@ with tab1:
                 import subprocess
                 import os
                 
-                # Copy the existing environment and inject Spark requirements
+                # Copy the existing environment
                 env = os.environ.copy()
-                env["JAVA_HOME"] = "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
+                
+                # Only set Mac-specific paths if we are on Mac and it's missing from env
+                if os.name == 'posix' and "JAVA_HOME" not in env:
+                    # Generic common paths or just let the system decide
+                    pass 
+                
+                # On Windows, we must ensure HADOOP_HOME is present if set
+                # (os.environ.copy() already handles this, but we're being explicit)
+                if "HADOOP_HOME" in os.environ:
+                    env["HADOOP_HOME"] = os.environ["HADOOP_HOME"]
+
                 env["SPARK_LOCAL_IP"] = "127.0.0.1"
                 env["PYTHONUNBUFFERED"] = "1"
                 

@@ -15,9 +15,21 @@ def check_env():
     print(f"JAVA_HOME: {java_home}")
     
     if os.name == 'nt':
-        if not hadoop_home:
-            print("\n[ERROR] HADOOP_HOME is not set.")
+        local_hadoop = os.path.abspath("hadoop")
+        if not hadoop_home and os.path.exists(os.path.join(local_hadoop, "bin", "winutils.exe")):
+            print(f"[OK] Found local Hadoop fallback at {local_hadoop}")
+            os.environ["HADOOP_HOME"] = local_hadoop
+            hadoop_home = local_hadoop
+            
+        if hadoop_home:
+            hadoop_bin = os.path.join(hadoop_home, "bin")
+            if hadoop_bin not in os.environ["PATH"]:
+                os.environ["PATH"] = hadoop_bin + os.path.pathsep + os.environ["PATH"]
+                print(f"[OK] Added {hadoop_bin} to PATH")
         else:
+            print("\n[ERROR] HADOOP_HOME is not set.")
+        
+        if hadoop_home:
             winutils_path = os.path.join(hadoop_home, "bin", "winutils.exe")
             hadoop_dll_path = os.path.join(hadoop_home, "bin", "hadoop.dll")
             

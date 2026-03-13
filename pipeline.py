@@ -3,6 +3,20 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, lower, lit, concat_ws, sha2, expr, explode, sum as spark_sum, split, length, collect_list, size
 from pyspark.ml.feature import HashingTF, IDF
 
+import sys
+
+def setup_hadoop_env():
+    """Checks and warns about Hadoop configuration on Windows."""
+    if os.name == 'nt':  # Windows
+        hadoop_home = os.environ.get("HADOOP_HOME")
+        if not hadoop_home:
+            print("WARNING: HADOOP_HOME environment variable is not set.")
+            print("Spark requires Hadoop binaries (winutils.exe) to run on Windows.")
+            print("Please download them from https://github.com/cdarlint/winutils and set HADOOP_HOME.")
+        elif not os.path.exists(os.path.join(hadoop_home, "bin", "winutils.exe")):
+            print(f"WARNING: winutils.exe not found in {os.path.join(hadoop_home, 'bin')}")
+            print("Spark may fail to perform local IO operations.")
+
 def create_spark_session():
     return SparkSession.builder \
         .appName("Scholarly Data Pipeline") \
@@ -44,6 +58,7 @@ def process_s2orc(spark, file_path):
     return res
 
 def main():
+    setup_hadoop_env()
     spark = create_spark_session()
     
     print("Loading datasets...")

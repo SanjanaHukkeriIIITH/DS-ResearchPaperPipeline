@@ -1,6 +1,17 @@
 import streamlit as st
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
+import os
+
+def setup_hadoop_env():
+    """Checks and warns about Hadoop configuration on Windows."""
+    if os.name == 'nt':  # Windows
+        hadoop_home = os.environ.get("HADOOP_HOME")
+        if not hadoop_home:
+            st.warning("HADOOP_HOME environment variable is not set. Spark requires Hadoop binaries (winutils.exe) to run on Windows.")
+            st.info("Please download them from https://github.com/cdarlint/winutils and set HADOOP_HOME.")
+        elif not os.path.exists(os.path.join(hadoop_home, "bin", "winutils.exe")):
+            st.error(f"winutils.exe not found in {os.path.join(hadoop_home, 'bin')}. Spark may fail to perform local IO operations.")
 
 # Optional: suppress warnings for simple logging
 import logging
@@ -11,6 +22,7 @@ logging.getLogger("py4j").setLevel(logging.ERROR)
 # ---------------------------------------------------------
 @st.cache_resource # Streamlit caches this so Spark doesn't restart on every click
 def init_spark():
+    setup_hadoop_env()
     return SparkSession.builder \
         .appName("Pipeline UI") \
         .master("local[*]") \

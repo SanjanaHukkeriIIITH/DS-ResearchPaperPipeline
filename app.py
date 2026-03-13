@@ -100,6 +100,7 @@ with tab1:
             with st.spinner(f"Aggregating live papers for '{query}' and re-indexing Spark database... Please wait."):
                 import subprocess
                 import os
+                import sys
                 
                 # Copy the existing environment
                 env = os.environ.copy()
@@ -110,21 +111,30 @@ with tab1:
                     pass 
                 
                 # On Windows, we must ensure HADOOP_HOME is present if set
-                # (os.environ.copy() already handles this, but we're being explicit)
                 if "HADOOP_HOME" in os.environ:
                     env["HADOOP_HOME"] = os.environ["HADOOP_HOME"]
 
                 env["SPARK_LOCAL_IP"] = "127.0.0.1"
                 env["PYTHONUNBUFFERED"] = "1"
                 
-                # Run the threadpool aggregator
-                subprocess.run(["python", "aggregator.py", query], env=env, check=True)
-                # Process the data through the Spark Engine
-                subprocess.run(["python", "pipeline.py"], env=env, check=True)
-                
-                # Invalidate the cache to reload PySpark
-                st.cache_resource.clear()
-                st.rerun()
+                try:
+                    # Run the threadpool aggregator
+                    agg_res = subprocess.run([sys.executable, "aggregator.py", query], env=env, capture_output=True, text=True)
+                    if agg_res.returncode != 0:
+                        st.error(f"Aggregator Failed:\n{agg_res.stderr}")
+                        st.stop()
+
+                    # Process the data through the Spark Engine
+                    pipe_res = subprocess.run([sys.executable, "pipeline.py"], env=env, capture_output=True, text=True)
+                    if pipe_res.returncode != 0:
+                        st.error(f"Pipeline Failed:\n{pipe_res.stderr}")
+                        st.stop()
+                    
+                    # Invalidate the cache to reload PySpark
+                    st.cache_resource.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Fatal error during execution: {e}")
 
 # Module 2: Author Analytics
 with tab2:

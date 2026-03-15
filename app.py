@@ -116,6 +116,7 @@ with tab1:
 
                 env["SPARK_LOCAL_IP"] = "127.0.0.1"
                 env["PYTHONUNBUFFERED"] = "1"
+                env["PYTHONIOENCODING"] = "utf-8"
                 
                 try:
                     # Run the threadpool aggregator

@@ -5,6 +5,10 @@ import requests
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 ARXIV_FILE = "live_arxiv.jsonl"
 S2ORC_FILE = "live_s2orc.jsonl"
 CACHE_FILE = "aggregator_cache.json"

@@ -51,6 +51,9 @@ class TemporalGATConv(MessagePassing):
         # Normalize scores across the neighborhood so they sum to 1.0
         alpha = softmax(alpha, index, ptr, size_i)
         
+        # Save the raw attention weights for tracking and plotting
+        self._alpha = alpha.detach()
+        
         # Multiply the cited paper's values by the decayed attention score
         return v_j * alpha.unsqueeze(-1)
 
@@ -73,7 +76,6 @@ class HeteroSemanticModel(nn.Module):
         fused_dim = (hidden_dim * 2) + edge_dim + 1 
         
         self.intent_head = nn.Linear(fused_dim, num_intents)
-        self.importance_head = nn.Linear(fused_dim, 1)
         self.dropout = nn.Dropout(0.5)
 
     def forward(self, x_dict, edge_index_dict, edge_attr_dict, delta_t_dict):
@@ -81,28 +83,38 @@ class HeteroSemanticModel(nn.Module):
         x_dict['author'] = F.relu(self.author_proj(x_dict['author']))
         
         # FIXED: Added parentheses around the tuple keys
+        # PyG HeteroData dictionaries use the full edge tuple as the key
+        cites_key = ('paper', 'cites', 'paper')
+        
         h_dict = self.conv1(
             x_dict, 
             edge_index_dict, 
-            edge_attr_dict={('paper', 'cites', 'paper'): edge_attr_dict['cites']},
-            delta_t_dict={('paper', 'cites', 'paper'): delta_t_dict['cites']}
+            edge_attr_dict={cites_key: edge_attr_dict[cites_key]},
+            delta_t_dict={cites_key: delta_t_dict[cites_key]}
         )
         
         h_papers = F.relu(h_dict['paper'])
         
-        cites_edge_index = edge_index_dict[('paper', 'cites', 'paper')]
+        cites_edge_index = edge_index_dict[cites_key]
         src_nodes, dst_nodes = cites_edge_index[0], cites_edge_index[1]
         
         edge_rep = torch.cat([
             h_papers[src_nodes], 
             h_papers[dst_nodes], 
-            edge_attr_dict['cites'], 
-            delta_t_dict['cites']  
+            edge_attr_dict[cites_key], 
+            delta_t_dict[cites_key]  
         ], dim=-1)
         
         edge_rep = self.dropout(edge_rep)
         
         intent_logits = self.intent_head(edge_rep)
-        importance_score = torch.sigmoid(self.importance_head(edge_rep))
         
-        return intent_logits, importance_score
+        # Extract the dynamically generated GAT Attention Weights!
+        # These are functionally the TRUE Semantic Weights of the citations.
+        alpha_scores = None
+        for k, v in self.conv1.convs.items():
+            if hasattr(v, '_alpha'):
+                alpha_scores = v._alpha
+                break
+        
+        return intent_logits, alpha_scores

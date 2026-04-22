@@ -1,3 +1,10 @@
-datasets
 pandas
+numpy
 requests
+beautifulsoup4
+torch
+torch_geometric
+transformers
+tqdm
+pyarrow
+datasets

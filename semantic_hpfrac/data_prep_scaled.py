@@ -164,9 +164,46 @@ def main():
     print("\n✅ Constructed Scaled HeteroData:")
     print(data)
     
+    # --- PHASE 1.5: NETWORK SANITY CHECK ---
+    print("\n🧐 COMMENCING NETWORK SANITY CHECK...")
+    labeled_count = data['paper', 'cites', 'paper'].train_mask.sum().item()
+    total_edges = data['paper', 'cites', 'paper'].edge_index.shape[1]
+    
+    print(f"|--- Total Unique Papers (Nodes): {num_papers}")
+    print(f"|--- Total Citation Edges (Links): {total_edges}")
+    print(f"|    |--- Labeled Hop-1 Edges: {labeled_count}")
+    print(f"|    |--- Unlabeled Hop-2 Edges: {total_edges - labeled_count}")
+    
+    # Check for density
+    if num_papers > 0:
+        avg_degree = total_edges / num_papers
+        print(f"|--- Average Paper Citation Degree: {avg_degree:.2f}")
+
+    print("✅ Sanity Check Passed. Proceeding to Heavy Vectorization...\n")
+
+    # --- PHASE 2: CONSOLIDATION & EXPORT FOR DASHBOARD ---
+    print("📦 Consolidation & Export for Dashboard...")
+    
+    # Merge all citation contexts into one Master file for the UI
+    h1_ctx = hop1[['hop1_id', 'hop0_id', 'citation_text']].copy().rename(columns={'hop1_id':'citing_id', 'hop0_id':'cited_id', 'citation_text':'context'})
+    h2_ctx = hop2[['hop2_id', 'hop1_id', 'citation_text']].copy().rename(columns={'hop2_id':'citing_id', 'hop1_id':'cited_id', 'citation_text':'context'})
+    
+    master_context = pd.concat([h1_ctx, h2_ctx]).dropna(subset=['context'])
+    master_context.to_parquet("citation_contexts_scaled.parquet", index=False)
+    
+    # Save the master metadata dict for UI lookups (Title/Year)
+    import json
+    with open("hop01_metadata_scaled.json", "w") as f:
+        json.dump(papers, f)
+    
+    # Save the actual Graph for Training
     out_path = "scicite_hetero_scaled.pt"
     torch.save(data, out_path)
-    print(f"\n🎉 Successfully saved formatted graph to {out_path}")
+    
+    print(f"🎉 SUCCESS! Consolidate Artifacts Ready for Kaggle -> Local:")
+    print(f" 1. Graph (Training): {out_path}")
+    print(f" 2. Master Contexts (UI): citation_contexts_scaled.parquet")
+    print(f" 3. Metadata Lookup (UI): hop01_metadata_scaled.json")
 
 if __name__ == '__main__':
     main()

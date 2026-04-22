@@ -28,7 +28,11 @@ def clean_and_stitch():
     h0_clean = h0.drop_duplicates(subset=['source_paper_id']).copy()
     
     # For Hop-1, prioritize the labeled version if there are multiple entries for the same citing-cited pair
-    # (By sorting by intent_label first, labels come before 'unknown')
+    # (By sorting by intent_label first, 'unknown' and NaNs go to the bottom)
+    if 'intent_label' in h1.columns:
+        # Create a temporary sorting key: 0 for valid labels, 1 for 'unknown'/NaN
+        is_unknown = h1['intent_label'].isna() | (h1['intent_label'].astype(str).str.lower() == 'unknown')
+        h1 = h1.assign(_sort_key=is_unknown).sort_values(by=['_sort_key', 'intent_label']).drop(columns=['_sort_key'])
     h1_clean = h1.drop_duplicates(subset=['hop1_id', 'hop0_id']).copy()
     h2_clean = h2.drop_duplicates(subset=['hop2_id', 'hop1_id']).copy()
 

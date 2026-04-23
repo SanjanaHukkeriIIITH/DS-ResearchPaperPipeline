@@ -200,6 +200,8 @@ def train_scaled():
         edge_index_np = data['paper', 'cites', 'paper'].edge_index.cpu().numpy()
 
     intent_name_map = {0: "Background", 1: "Method", 2: "Result"}
+    
+    print("Constructing Edge Leaderboard...")
     edges_df = pd.DataFrame({
         "citing_paper_id": [paper_ids[i] for i in edge_index_np[0]],
         "cited_paper_id":  [paper_ids[i] for i in edge_index_np[1]],
@@ -207,7 +209,17 @@ def train_scaled():
         "semantic_weight":   final_weights
     })
     edges_df.to_parquet("data/edge_predictions_scaled.parquet", index=False)
+    
+    print("Constructing Paper Impact Summary...")
+    # Calculate cumulative semantic impact for every cited paper
+    paper_impact = edges_df.groupby('cited_paper_id').agg({
+        'semantic_weight': 'sum',
+        'citing_paper_id': 'count'
+    }).rename(columns={'semantic_weight': 'total_semantic_impact', 'citing_paper_id': 'raw_citation_count'})
+    
+    paper_impact.reset_index().to_csv("data/paper_impact_scaled.csv", index=False)
     print("  ✅ Saved: data/edge_predictions_scaled.parquet")
+    print("  ✅ Saved: data/paper_impact_scaled.csv")
 
     print("\n📦 Summary of Scaled Training Artefacts:")
     print("   data/hgnn_weights_scaled.pth          → Model weights for fine-tuning")

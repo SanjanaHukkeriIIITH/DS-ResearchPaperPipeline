@@ -192,9 +192,9 @@ def main():
     h1_ctx = hop1[['hop1_id', 'hop0_id', 'citation_text']].copy().rename(columns={'hop1_id':'citing_id', 'hop0_id':'cited_id', 'context':'citation_text'})
     h2_ctx = hop2[['hop2_id', 'hop1_id', 'citation_text']].copy().rename(columns={'hop2_id':'citing_id', 'hop1_id':'cited_id', 'context':'citation_text'})
     master_context = pd.concat([h1_ctx, h2_ctx]).dropna(subset=['citation_text']).drop_duplicates(subset=['citing_id', 'cited_id'])
-    master_context.to_parquet("data/citation_contexts_scaled.parquet", index=False)
-    with open("data/hop01_metadata_scaled.json", "w") as f: json.dump(papers, f)
-    torch.save(data, "data/scicite_hetero_scaled.pt")
+    master_context.to_parquet("data/data_v2/citation_contexts_scaled.parquet", index=False)
+    with open("data/data_v2/hop01_metadata_scaled.json", "w") as f: json.dump(papers, f)
+    torch.save(data, "data/data_v2/scicite_hetero_scaled.pt")
     print(f"🎉 All layers (0, 1, 2) mapped and saved!")
 
 if __name__ == '__main__':

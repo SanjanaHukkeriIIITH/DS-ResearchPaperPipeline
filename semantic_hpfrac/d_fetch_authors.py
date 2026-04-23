@@ -59,14 +59,19 @@ def main():
                         src_id = batch_ids[idx]
                         
                         # Extract each author for this paper
-                        for author in paper_data['authors']:
+                        # Extract each author for this paper
+                        for a_idx, author in enumerate(paper_data['authors']):
                             auth_id = author.get('authorId')
-                            if auth_id: # Ignore authors without a registered S2 ID
-                                author_edges.append({
-                                    "paper_id": src_id,
-                                    "author_id": auth_id,
-                                    "author_name": author.get('name', 'Unknown')
-                                })
+                            
+                            # Generate a unique dummy ID if missing so the a_i count stays accurate!
+                            if not auth_id:
+                                auth_id = f"unknown_{src_id}_{a_idx}"
+                                
+                            author_edges.append({
+                                "paper_id": src_id,
+                                "author_id": str(auth_id),
+                                "author_name": author.get('name', 'Unknown')
+                            })
                 
                 # Append to CSV and update checkpoint
                 if author_edges:

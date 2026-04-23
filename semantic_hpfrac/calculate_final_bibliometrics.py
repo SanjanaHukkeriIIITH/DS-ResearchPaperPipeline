@@ -24,18 +24,29 @@ impact_df = pd.read_csv(impact_path)
 # 2. Load the Rescued Metadata
 meta_df = pd.read_csv(meta_path)
 
+# Dynamically find the correct column names
+col_map = {}
+if 'paper_id' in meta_df.columns: col_map['id'] = 'paper_id'
+elif 'source_paper_id' in meta_df.columns: col_map['id'] = 'source_paper_id'
+
+if 'authors' in meta_df.columns: col_map['authors'] = 'authors'
+elif 'author_names' in meta_df.columns: col_map['authors'] = 'author_names'
+
+if 'id' not in col_map or 'authors' not in col_map:
+    print(f"❌ Error: Could not find ID or Author columns. Found: {list(meta_df.columns)}")
+    exit()
+
 print(f"✅ Loaded {len(impact_df):,} paper scores.")
-print(f"✅ Loaded {len(meta_df):,} paper metadata records.")
+print(f"✅ Loaded {len(meta_df):,} paper metadata records (using '{col_map['id']}' and '{col_map['authors']}').")
 
 # 3. Join Model Scores with Metadata
-# We merge on the original IDs to ensure S2 Aliases don't break the mapping
 final_results = pd.merge(
     impact_df, 
-    meta_df[['paper_id', 'title', 'authors', 'year']], 
+    meta_df[[col_map['id'], 'title', col_map['authors'], 'year']], 
     left_on='cited_paper_id', 
-    right_on='paper_id', 
+    right_on=col_map['id'], 
     how='inner'
-)
+).rename(columns={col_map['id']: 'paper_id', col_map['authors']: 'authors'})
 
 if final_results.empty:
     print("❌ MAPPING ERROR: Simple join failed. Attempting fuzzy match on original source IDs...")
